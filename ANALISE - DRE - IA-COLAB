@@ -1,0 +1,174 @@
+# Instalação da biblioteca Groq
+!pip install -q groq
+
+# Imports
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from io import BytesIO
+from ipywidgets import FileUpload, Output, VBox
+from IPython.display import display
+from groq import Groq
+from google.colab import userdata
+
+# Output para exibir mensagens e gráficos
+output = Output()
+
+# Recupera a chave da API da Groq do ambiente seguro
+GROQ_API_KEY = userdata.get("APP_KEY_GROQ")
+if not GROQ_API_KEY:
+    raise ValueError("⚠️ A chave APP_KEY_GROQ não foi encontrada. Salve no ambiente do Colab com: userdata.set('APP_KEY_GROQ', 'sua_chave_aqui')")
+
+# Inicializa o cliente Groq
+client = Groq(api_key=GROQ_API_KEY)
+
+# Função para gerar relatório com IA
+def gerar_relatorio_ia(texto_analise):
+    prompt = f"""
+    Com base na seguinte análise financeira gerada por gráficos e interpretação de dados:
+
+    {texto_analise}
+
+    Gere um relatório em linguagem natural, com insights adicionais, sugestões e observações relevantes sobre o desempenho da empresa. Seja claro, objetivo e profissional.
+    """
+
+    resposta = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[
+            {"role": "system", "content": "Você é um analista financeiro especializado em relatórios gerenciais."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.5
+    )
+
+    return resposta.choices[0].message.content
+
+# Função para processar o upload do arquivo
+def processar_upload(change):
+    with output:
+        output.clear_output()
+        uploaded_file = next(iter(upload.value.values()))
+        content = uploaded_file['content']
+        dados = pd.read_excel(BytesIO(content), index_col=0)
+        dados.index.name = "Categoria"
+        print("Dados carregados com sucesso!")
+        explorar_dados(dados)
+
+# Análise 1: Receita Bruta
+def crescimento_anual_receita(dados):
+    colunas_temporais = pd.to_datetime(dados.columns, format="%b-%Y", errors="coerce")
+    dados.columns = colunas_temporais
+
+    receita_bruta = dados.loc["Receita Bruta"]
+    receita_anual = receita_bruta.resample("YE").sum()
+    crescimento_anual = receita_anual.pct_change() * 100
+
+    plt.figure(figsize=(10, 6))
+    bars = plt.bar(receita_anual.index.year, receita_anual.values, color="skyblue", label="Receita Anual (R$)")
+    plt.plot(receita_anual.index.year, receita_anual.values, marker="o", color="blue", label="Receita Bruta")
+    plt.title("Crescimento Anual da Receita Bruta")
+    plt.xlabel("Ano")
+    plt.ylabel("Valores (em R$)")
+    plt.grid(True, linestyle="--", alpha=0.6)
+
+    for i, bar in enumerate(bars):
+        valor = f"{receita_anual.values[i]:,.2f}"
+        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.05 * bar.get_height(), valor, ha="center", fontsize=10)
+        if i > 0 and not np.isnan(crescimento_anual.values[i]):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() / 2, f"{crescimento_anual.values[i]:.2f}%", ha="center", va="bottom", fontsize=10, color="red")
+
+    plt.legend()
+    plt.show()
+
+    analise = "Análise do Crescimento Anual da Receita Bruta:\n"
+    for ano, crescimento in zip(receita_anual.index.year[1:], crescimento_anual.values[1:]):
+        analise += f"- Em {ano}, o crescimento foi de {crescimento:.2f}%.\n"
+    print("\n" + analise)
+    return analise
+
+# Análise 2: Lucros
+def analisar_tendencia_lucros(dados):
+    lucro_bruto = dados.loc["(=) Lucro Bruto"]
+    lucro_liquido = dados.loc["(=) Resultado Líquido"]
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(lucro_bruto.index, lucro_bruto.values, label="Lucro Bruto", marker="o", color="green")
+    plt.plot(lucro_liquido.index, lucro_liquido.values, label="Lucro Líquido", marker="o", color="orange")
+    plt.title("Tendência do Lucro Bruto e Lucro Líquido")
+    plt.xlabel("Período")
+    plt.ylabel("Valores (em R$)")
+    plt.xticks(rotation=45)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+    plt.show()
+
+    crescimento_lucro_bruto = ((lucro_bruto.iloc[-1] / lucro_bruto.iloc[0]) - 1) * 100
+    crescimento_lucro_liquido = ((lucro_liquido.iloc[-1] / lucro_liquido.iloc[0]) - 1) * 100
+
+    analise = (
+        "Análise das Tendências do Lucro Bruto e Lucro Líquido:\n"
+        f"- O Lucro Bruto cresceu {crescimento_lucro_bruto:.2f}% durante o período.\n"
+        f"- O Lucro Líquido cresceu {crescimento_lucro_liquido:.2f}% durante o período.\n"
+    )
+    print("\n" + analise)
+    return analise
+
+# Análise 3: Despesas
+def analisar_despesas(dados):
+    despesas_categorias = [
+        "(-) Despesas com Vendas",
+        "(-) Despesas Administrativas",
+        "(-) Despesas Financeiras"
+    ]
+
+    despesas_percentuais = dados.loc[despesas_categorias].div(dados.loc["Receita Bruta"]) * 100
+
+    plt.figure(figsize=(12, 6))
+    for categoria in despesas_categorias:
+        plt.plot(despesas_percentuais.columns, despesas_percentuais.loc[categoria], label=categoria, marker="o")
+    plt.title("Despesas Relativas à Receita Bruta (%)")
+    plt.xlabel("Período")
+    plt.ylabel("Percentual (%)")
+    plt.xticks(rotation=45)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend()
+    plt.show()
+
+    analise = "Análise das Despesas Relativas à Receita Bruta:\n"
+    for despesa in despesas_categorias:
+        max_periodo = despesas_percentuais.loc[despesa].idxmax()
+        max_valor = despesas_percentuais.loc[despesa].max()
+        analise += f"- {despesa} atingiu o maior valor relativo em {max_periodo.strftime('%b-%Y')} ({max_valor:.2f}%).\n"
+
+    print("\n" + analise)
+    return analise
+
+# Função principal
+def explorar_dados(dados):
+    print("Explorando os dados fornecidos...")
+
+    print("\n1. Crescimento Anual da Receita Bruta:")
+    analise1 = crescimento_anual_receita(dados)
+
+    print("\n2. Tendência do Lucro Bruto e Lucro Líquido:")
+    analise2 = analisar_tendencia_lucros(dados)
+
+    print("\n3. Despesas Relativas à Receita Bruta:")
+    analise3 = analisar_despesas(dados)
+
+    # Consulta à IA Generativa Groq
+    texto_analise = analise1 + "\n" + analise2 + "\n" + analise3
+    print("\n🔎 Relatório Gerado pela IA (Groq - LLaMA 3.2):\n")
+    relatorio_ia = gerar_relatorio_ia(texto_analise)
+    print(relatorio_ia)
+
+# Interface de upload
+upload = FileUpload(
+    accept=".xlsx",
+    multiple=False
+)
+upload.observe(processar_upload, names='value')
+
+# Exibir interface
+print("Por favor, faça o upload do arquivo Excel com os dados financeiros:")
+display(VBox([upload, output]))
